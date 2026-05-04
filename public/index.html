@@ -446,10 +446,10 @@
 
   <!-- Main: editor -->
   <div class="main" id="main">
-    <div class="welcome">
+    <div class="welcome" id="welcome">
       <div class="icon">&#129504;</div>
       <h2>Claude Memory Dashboard</h2>
-      <p>Select a file from the sidebar to view and edit. The tree structure follows your MEMORY.md index topology.</p>
+      <p>Select a file from the sidebar to view and edit.</p>
     </div>
   </div>
 
@@ -468,16 +468,26 @@ const state = {
   fingerprint: null,
   lastRefresh: null,
   autoRefreshTimer: null,
-  editingFile: null, // track if user is currently editing
+  editingFile: null,
+  mode: 'detecting', // 'api' | 'static' | 'detecting'
 };
 
 async function load() {
-  const res = await fetch('/api/files');
-  state.data = await res.json();
-  state.fingerprint = state.data.meta?.fingerprint;
-  state.lastRefresh = new Date();
-  renderAll();
-  renderRefreshStatus();
+  try {
+    const res = await fetch('/api/files');
+    if (res.ok) {
+      state.data = await res.json();
+      state.fingerprint = state.data.meta?.fingerprint;
+      state.lastRefresh = new Date();
+      state.mode = 'api';
+      renderAll();
+      renderRefreshStatus();
+      return;
+    }
+  } catch {}
+  // API not available — show static mode loader
+  state.mode = 'static';
+  showStaticLoader();
 }
 
 // Auto-refresh: poll /api/changes every 3s, reload only if fingerprint changed
@@ -724,6 +734,10 @@ async function selectFile(name) {
 }
 
 async function saveFile(name) {
+  if (state.mode === 'static') {
+    showToast('Save not available in static mode', 'error');
+    return;
+  }
   const textarea = document.getElementById('editor');
   const btn = document.getElementById('saveBtn');
   if (!textarea) return;
@@ -907,12 +921,136 @@ document.getElementById('searchInput').addEventListener('input', (e) => {
 
 // Boot
 load().then(() => {
-  startAutoRefresh();
-  // Show project path
-  if (state.data?.meta?.projectPath) {
-    document.getElementById('projectPath').textContent = state.data.meta.projectPath;
+  if (state.mode === 'api') {
+    startAutoRefresh();
+    if (state.data?.meta?.projectPath) {
+      document.getElementById('projectPath').textContent = state.data.meta.projectPath;
+    }
   }
 });
+
+// ===== Static mode: load from JSON export =====
+function showStaticLoader() {
+  const main = document.getElementById('main');
+  main.innerHTML = `
+    <div class="welcome" style="gap:20px">
+      <div class="icon">&#129504;</div>
+      <h2>Claude Memory Dashboard</h2>
+      <p style="color:#8b949e;max-width:480px;text-align:center;line-height:1.6">
+        No local server detected. Load a memory export JSON to view your Claude Code memory offline.
+      </p>
+      <div style="display:flex;flex-direction:column;gap:12px;align-items:center">
+        <label style="display:block;padding:12px 24px;background:#1f6feb;color:#fff;border-radius:8px;cursor:pointer;font-size:14px;font-weight:600">
+          Load JSON Export
+          <input type="file" accept=".json" onchange="loadJSONFile(event)" style="display:none">
+        </label>
+        <div style="font-size:12px;color:#484f58">
+          Export from local server: <code style="background:#21262d;padding:2px 6px;border-radius:4px">curl http://localhost:3456/api/export > memory.json</code>
+        </div>
+        <div style="font-size:12px;color:#484f58">
+          Or drag & drop a .json file anywhere on this page
+        </div>
+      </div>
+    </div>
+  `;
+
+  // Drag & drop support
+  document.body.addEventListener('dragover', (e) => { e.preventDefault(); e.stopPropagation(); });
+  document.body.addEventListener('drop', (e) => {
+    e.preventDefault();
+    const file = e.dataTransfer.files[0];
+    if (file && file.name.endsWith('.json')) {
+      const reader = new FileReader();
+      reader.onload = (ev) => loadJSONData(JSON.parse(ev.target.result));
+      reader.readAsText(file);
+    }
+  });
+}
+
+function loadJSONFile(event) {
+  const file = event.target.files[0];
+  if (!file) return;
+  const reader = new FileReader();
+  reader.onload = (ev) => loadJSONData(JSON.parse(ev.target.result));
+  reader.readAsText(file);
+}
+
+function loadJSONData(exportData) {
+  // Convert export format to the same format as /api/files
+  if (!exportData.files) {
+    showToast('Invalid export file', 'error');
+    return;
+  }
+
+  // Reconstruct index from raw MEMORY.md text
+  let index = null;
+  if (exportData.index) {
+    index = parseMemoryIndexFromRaw(exportData.index);
+  }
+
+  state.data = {
+    files: exportData.files.map(f => ({
+      ...f,
+      modified: f.modified || exportData.exportedAt,
+      frontmatter: {},
+    })),
+    index,
+    tokenBudget: exportData.tokenBudget || {
+      total: exportData.files.reduce((s, f) => s + (f.tokens || 0), 0),
+      byType: {},
+      byFile: exportData.files.map(f => ({ name: f.name, tokens: f.tokens || 0, type: f.type })),
+    },
+    duplicates: [],
+    summary: {
+      totalFiles: exportData.files.length,
+      totalSize: exportData.files.reduce((s, f) => s + (f.size || 0), 0),
+      types: exportData.files.reduce((acc, f) => { acc[f.type] = (acc[f.type]||0)+1; return acc; }, {}),
+    },
+    meta: {
+      projectPath: exportData.projectPath || '',
+      exportedAt: exportData.exportedAt,
+    },
+  };
+  state.mode = 'static';
+  renderAll();
+
+  // Hide refresh status in static mode
+  const el = document.getElementById('refreshStatus');
+  if (el) el.innerHTML = '<span style="color:#484f58">Static mode (read-only)</span>';
+
+  showToast(`Loaded ${exportData.files.length} files from export`, 'success');
+}
+
+function parseMemoryIndexFromRaw(raw) {
+  const sections = [];
+  let currentSection = null;
+  for (const line of raw.split('\n')) {
+    const h2 = line.match(/^## (.+)/);
+    const h3 = line.match(/^### (.+)/);
+    if (h2) {
+      currentSection = { title: h2[1], level: 2, children: [] };
+      sections.push(currentSection);
+      continue;
+    }
+    if (h3) {
+      const sub = { title: h3[1], level: 3, children: [] };
+      if (currentSection) currentSection.children.push(sub);
+      else sections.push(sub);
+      currentSection = sub;
+      continue;
+    }
+    const linkMatch = line.match(/^- \*?\*?\[(.+?)\]\(\.\/(.+?)\)\*?\*?\s*[—–-]\s*(.*)/);
+    if (linkMatch && currentSection) {
+      currentSection.children.push({ type: 'leaf', label: linkMatch[1], file: linkMatch[2], description: linkMatch[3].trim() });
+      continue;
+    }
+    const linkSimple = line.match(/^- \*?\*?\[(.+?)\]\(\.\/(.+?)\)\*?\*?/);
+    if (linkSimple && currentSection) {
+      currentSection.children.push({ type: 'leaf', label: linkSimple[1], file: linkSimple[2], description: '' });
+    }
+  }
+  return { raw, sections };
+}
 </script>
 </body>
 </html>

@@ -333,6 +333,34 @@ function countByType(files) {
   return counts;
 }
 
+// Export all data as JSON (for cloud version)
+app.get('/api/export', (req, res) => {
+  const memoryDir = getMemoryDir();
+  if (!memoryDir) return res.status(404).json({ error: 'No memory directory' });
+
+  const files = scanMemoryDir(memoryDir);
+  const index = parseMemoryIndex(memoryDir);
+  const withTokens = files.map(f => ({ ...f, tokens: estimateTokens(f.raw) }));
+  const totalTokens = withTokens.reduce((s, f) => s + f.tokens, 0);
+
+  res.setHeader('Content-Disposition', 'attachment; filename=claude-memory-export.json');
+  res.json({
+    version: 1,
+    exportedAt: new Date().toISOString(),
+    projectPath: discoverProjects().find(p => p.memoryDir === memoryDir)?.displayPath || '',
+    files: withTokens.map(f => ({
+      name: f.name, raw: f.raw, type: f.type,
+      description: f.description, memoryName: f.memoryName,
+      size: f.size, tokens: f.tokens,
+    })),
+    index: index ? index.raw : null,
+    tokenBudget: {
+      total: totalTokens,
+      byType: groupByType(withTokens),
+    },
+  });
+});
+
 app.listen(PORT, () => {
   const memoryDir = getMemoryDir();
   const projects = discoverProjects();
