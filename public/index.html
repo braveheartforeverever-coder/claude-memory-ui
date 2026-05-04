@@ -1,0 +1,918 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="color-scheme" content="dark">
+<title>Claude Memory UI</title>
+<style>
+  html {
+    color-scheme: dark;
+    -webkit-color-scheme: dark;
+  }
+  :root {
+    --bg: #0d1117;
+    --bg-surface: #161b22;
+    --bg-card: #1c2128;
+    --bg-hover: #21262d;
+    --bg-active: #1f6feb22;
+    --border: #30363d;
+    --text: #e6edf3;
+    --text-secondary: #8b949e;
+    --text-muted: #484f58;
+    --accent: #58a6ff;
+    --accent-emphasis: #1f6feb;
+    --green: #3fb950;
+    --orange: #d29922;
+    --red: #f85149;
+    --purple: #bc8cff;
+    --pink: #f778ba;
+    --radius: 8px;
+    --font-mono: 'SF Mono', 'Cascadia Code', 'Fira Code', monospace;
+    --font-sans: -apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif;
+  }
+
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html, body {
+    font-family: var(--font-sans);
+    background-color: #0d1117 !important;
+    color: #e6edf3 !important;
+    height: 100vh;
+    overflow: hidden;
+  }
+
+  /* Layout */
+  .app {
+    display: grid;
+    grid-template-columns: 320px 1fr 280px;
+    grid-template-rows: 48px 1fr;
+    height: 100vh;
+    background-color: #0d1117;
+    color-scheme: dark;
+  }
+
+  /* Top bar */
+  .topbar {
+    grid-column: 1 / -1;
+    display: flex;
+    align-items: center;
+    padding: 0 16px;
+    background-color: #161b22 !important;
+    border-bottom: 1px solid #30363d;
+    gap: 16px;
+  }
+  .topbar h1 {
+    font-size: 14px;
+    font-weight: 600;
+    color: #58a6ff;
+    white-space: nowrap;
+  }
+  .topbar .summary {
+    font-size: 12px;
+    color: #8b949e;
+    display: flex;
+    gap: 12px;
+  }
+  .topbar .summary span {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+  }
+  .topbar .summary .dot {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    display: inline-block;
+  }
+
+  /* Type filter tabs */
+  .type-tabs {
+    display: flex;
+    gap: 4px;
+    margin-left: auto;
+  }
+  .type-tab {
+    padding: 4px 10px;
+    font-size: 11px;
+    border-radius: 12px;
+    cursor: pointer;
+    border: 1px solid #30363d;
+    background: transparent;
+    color: #8b949e;
+    transition: all 0.15s;
+  }
+  .type-tab:hover { border-color: #58a6ff; color: #e6edf3; }
+  .type-tab.active {
+    background-color: #1f6feb;
+    border-color: #1f6feb;
+    color: #fff;
+  }
+  .type-tab .count {
+    opacity: 0.7;
+    margin-left: 4px;
+  }
+
+  /* Sidebar: tree */
+  .sidebar {
+    background-color: #161b22 !important;
+    border-right: 1px solid #30363d;
+    overflow-y: auto;
+    padding: 8px 0;
+  }
+  .sidebar::-webkit-scrollbar { width: 6px; }
+  .sidebar::-webkit-scrollbar-thumb { background: #30363d; border-radius: 3px; }
+
+  .tree-section { margin-bottom: 2px; }
+  .tree-header {
+    padding: 6px 12px;
+    font-size: 11px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    color: #484f58;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    user-select: none;
+  }
+  .tree-header:hover { color: #8b949e; }
+  .tree-header .arrow {
+    font-size: 10px;
+    transition: transform 0.15s;
+  }
+  .tree-header.collapsed .arrow { transform: rotate(-90deg); }
+
+  .tree-item {
+    padding: 5px 12px 5px 24px;
+    font-size: 13px;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    color: #8b949e;
+    transition: all 0.1s;
+    border-left: 2px solid transparent;
+  }
+  .tree-item:hover {
+    background-color: #21262d !important;
+    color: #e6edf3 !important;
+  }
+  .tree-item.active {
+    background-color: #1f6feb22 !important;
+    color: #58a6ff !important;
+    border-left-color: #58a6ff;
+  }
+  .tree-item .type-badge {
+    font-size: 9px;
+    padding: 1px 5px;
+    border-radius: 4px;
+    font-weight: 600;
+    text-transform: uppercase;
+    flex-shrink: 0;
+  }
+  .tree-item .token-count {
+    margin-left: auto;
+    font-size: 10px;
+    color: #484f58;
+    font-family: var(--font-mono);
+  }
+  .tree-item .desc-hint {
+    font-size: 11px;
+    color: #484f58;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    max-width: 120px;
+  }
+
+  /* Type colors */
+  .type-user { background-color: #1f6feb33 !important; color: #58a6ff !important; }
+  .type-feedback { background-color: #3fb95033 !important; color: #3fb950 !important; }
+  .type-project { background-color: #d2992233 !important; color: #d29922 !important; }
+  .type-reference { background-color: #bc8cff33 !important; color: #bc8cff !important; }
+  .type-global { background-color: #f778ba33 !important; color: #f778ba !important; }
+  .type-index { background-color: #58a6ff33 !important; color: #58a6ff !important; }
+  .type-other { background-color: #484f5833 !important; color: #8b949e !important; }
+
+  /* Main editor area */
+  .main {
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+    background-color: #0d1117;
+  }
+
+  .editor-header {
+    padding: 12px 16px;
+    border-bottom: 1px solid #30363d;
+    background-color: #161b22;
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    flex-shrink: 0;
+  }
+  .editor-header .file-name {
+    font-size: 15px;
+    font-weight: 600;
+    font-family: var(--font-mono);
+    color: #e6edf3;
+  }
+  .editor-header .file-meta {
+    font-size: 11px;
+    color: #484f58;
+    display: flex;
+    gap: 10px;
+  }
+  .editor-header .save-btn {
+    margin-left: auto;
+    padding: 6px 14px;
+    font-size: 12px;
+    font-weight: 600;
+    background-color: #1f6feb;
+    color: #fff;
+    border: none;
+    border-radius: var(--radius);
+    cursor: pointer;
+    transition: opacity 0.15s;
+  }
+  .save-btn:hover { opacity: 0.85; }
+  .save-btn.saved { background-color: #3fb950; }
+  .save-btn.saving { opacity: 0.5; cursor: wait; }
+
+  .editor-body {
+    flex: 1;
+    overflow: hidden;
+  }
+  .editor-body textarea {
+    width: 100%;
+    height: 100%;
+    background-color: #0d1117 !important;
+    color: #e6edf3 !important;
+    border: none;
+    outline: none;
+    resize: none;
+    padding: 16px;
+    font-family: var(--font-mono);
+    font-size: 13px;
+    line-height: 1.7;
+    tab-size: 2;
+    color-scheme: dark;
+    -webkit-text-fill-color: #e6edf3;
+  }
+
+  /* Welcome screen */
+  .welcome {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    height: 100%;
+    background-color: #0d1117;
+    color: #484f58;
+    gap: 16px;
+  }
+  .welcome .icon { font-size: 48px; opacity: 0.3; }
+  .welcome h2 { font-size: 18px; color: #8b949e; font-weight: 400; }
+  .welcome p { font-size: 13px; max-width: 400px; text-align: center; line-height: 1.6; }
+
+  /* Right panel: analysis */
+  .analysis {
+    background-color: #161b22 !important;
+    border-left: 1px solid #30363d;
+    overflow-y: auto;
+    padding: 12px;
+  }
+  .analysis::-webkit-scrollbar { width: 6px; }
+  .analysis::-webkit-scrollbar-thumb { background: #30363d; border-radius: 3px; }
+
+  .analysis-card {
+    background-color: #1c2128 !important;
+    border: 1px solid #30363d;
+    border-radius: var(--radius);
+    padding: 12px;
+    margin-bottom: 10px;
+  }
+  .analysis-card h3 {
+    font-size: 12px;
+    font-weight: 600;
+    color: #8b949e;
+    margin-bottom: 10px;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+  }
+
+  /* Token chart */
+  .token-bar-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-bottom: 6px;
+    font-size: 11px;
+  }
+  .token-bar-label {
+    width: 70px;
+    text-align: right;
+    color: #8b949e;
+    flex-shrink: 0;
+  }
+  .token-bar-track {
+    flex: 1;
+    height: 14px;
+    background-color: #0d1117;
+    border-radius: 3px;
+    overflow: hidden;
+  }
+  .token-bar-fill {
+    height: 100%;
+    border-radius: 3px;
+    transition: width 0.3s;
+  }
+  .token-bar-value {
+    width: 50px;
+    text-align: right;
+    font-family: var(--font-mono);
+    color: #484f58;
+    flex-shrink: 0;
+  }
+
+  /* Duplication list */
+  .dupe-item {
+    padding: 8px;
+    margin-bottom: 6px;
+    background-color: #0d1117;
+    border-radius: 6px;
+    font-size: 12px;
+  }
+  .dupe-type {
+    font-size: 10px;
+    font-weight: 600;
+    text-transform: uppercase;
+    margin-bottom: 4px;
+  }
+  .dupe-type.warning { color: #d29922; }
+  .dupe-type.info { color: #58a6ff; }
+  .dupe-files {
+    color: #8b949e;
+    font-family: var(--font-mono);
+    font-size: 11px;
+  }
+  .dupe-sim {
+    font-size: 10px;
+    color: #484f58;
+    margin-top: 3px;
+  }
+
+  /* Token total */
+  .token-total {
+    text-align: center;
+    padding: 8px;
+    margin-bottom: 10px;
+  }
+  .token-total .number {
+    font-size: 28px;
+    font-weight: 700;
+    font-family: var(--font-mono);
+    color: #58a6ff;
+  }
+  .token-total .label {
+    font-size: 11px;
+    color: #484f58;
+  }
+  .token-total .warning {
+    font-size: 11px;
+    color: #d29922;
+    margin-top: 4px;
+  }
+
+  /* Status bar */
+  .status-toast {
+    position: fixed;
+    bottom: 20px;
+    right: 20px;
+    padding: 8px 16px;
+    border-radius: var(--radius);
+    font-size: 12px;
+    font-weight: 500;
+    opacity: 0;
+    transform: translateY(10px);
+    transition: all 0.2s;
+    z-index: 100;
+  }
+  .status-toast.show { opacity: 1; transform: translateY(0); }
+  .status-toast.success { background-color: #3fb950; color: #000; }
+  .status-toast.error { background-color: #f85149; color: #fff; }
+
+  /* Search */
+  .search-box {
+    padding: 8px 12px;
+    border-bottom: 1px solid #30363d;
+    background-color: #161b22;
+  }
+  .search-box input {
+    width: 100%;
+    background-color: #0d1117 !important;
+    border: 1px solid #30363d;
+    border-radius: 6px;
+    padding: 6px 10px;
+    font-size: 12px;
+    color: #e6edf3 !important;
+    outline: none;
+    color-scheme: dark;
+  }
+  .search-box input:focus { border-color: var(--accent); }
+  .search-box input::placeholder { color: var(--text-muted); }
+</style>
+</head>
+<body>
+
+<div class="app">
+  <!-- Top bar -->
+  <div class="topbar">
+    <h1>Claude Memory UI</h1>
+    <div class="summary" id="summary"></div>
+    <span id="projectPath" style="font-size:11px;color:#484f58;font-family:var(--font-mono)"></span>
+    <div id="refreshStatus" style="font-size:11px;margin-left:8px;white-space:nowrap"></div>
+    <div class="type-tabs" id="typeTabs"></div>
+  </div>
+
+  <!-- Sidebar: tree view -->
+  <div class="sidebar">
+    <div class="search-box">
+      <input type="text" id="searchInput" placeholder="Search memory files...">
+    </div>
+    <div id="tree"></div>
+  </div>
+
+  <!-- Main: editor -->
+  <div class="main" id="main">
+    <div class="welcome">
+      <div class="icon">&#129504;</div>
+      <h2>Claude Memory Dashboard</h2>
+      <p>Select a file from the sidebar to view and edit. The tree structure follows your MEMORY.md index topology.</p>
+    </div>
+  </div>
+
+  <!-- Right: analysis -->
+  <div class="analysis" id="analysis"></div>
+</div>
+
+<div class="status-toast" id="toast"></div>
+
+<script>
+const state = {
+  data: null,
+  activeFile: null,
+  filter: 'all',
+  searchQuery: '',
+  fingerprint: null,
+  lastRefresh: null,
+  autoRefreshTimer: null,
+  editingFile: null, // track if user is currently editing
+};
+
+async function load() {
+  const res = await fetch('/api/files');
+  state.data = await res.json();
+  state.fingerprint = state.data.meta?.fingerprint;
+  state.lastRefresh = new Date();
+  renderAll();
+  renderRefreshStatus();
+}
+
+// Auto-refresh: poll /api/changes every 3s, reload only if fingerprint changed
+function startAutoRefresh() {
+  if (state.autoRefreshTimer) clearInterval(state.autoRefreshTimer);
+  state.autoRefreshTimer = setInterval(async () => {
+    try {
+      const res = await fetch('/api/changes');
+      const { fingerprint } = await res.json();
+      if (fingerprint && fingerprint !== state.fingerprint) {
+        // Don't reload if user is actively editing
+        if (state.editingFile) {
+          renderRefreshStatus('pending');
+          return;
+        }
+        await load();
+        showToast('Memory updated', 'success');
+      }
+    } catch {}
+  }, 3000);
+}
+
+function renderRefreshStatus(pending) {
+  const el = document.getElementById('refreshStatus');
+  if (!el) return;
+  const time = state.lastRefresh ? state.lastRefresh.toLocaleTimeString('zh-CN') : '--';
+  if (pending === 'pending') {
+    el.innerHTML = `<span style="color:#d29922">Memory changed — refresh to update</span>
+      <button onclick="forceRefresh()" style="background:#d29922;color:#000;border:none;padding:2px 8px;border-radius:4px;font-size:11px;cursor:pointer;margin-left:4px">Refresh</button>`;
+  } else {
+    el.innerHTML = `<span style="color:#3fb950">&#9679;</span> Auto-refresh · Last: ${time}`;
+  }
+}
+
+async function forceRefresh() {
+  state.editingFile = null;
+  await load();
+}
+
+function renderAll() {
+  renderSummary();
+  renderTypeTabs();
+  renderTree();
+  renderAnalysis();
+}
+
+function renderSummary() {
+  const { summary, tokenBudget } = state.data;
+  document.getElementById('summary').innerHTML = `
+    <span><span class="dot" style="background:var(--green)"></span>${summary.totalFiles} files</span>
+    <span><span class="dot" style="background:var(--accent)"></span>${formatBytes(summary.totalSize)}</span>
+    <span><span class="dot" style="background:var(--orange)"></span>${tokenBudget.total.toLocaleString()} tokens</span>
+  `;
+}
+
+function renderTypeTabs() {
+  const { summary } = state.data;
+  const types = ['all', ...Object.keys(summary.types)];
+  document.getElementById('typeTabs').innerHTML = types.map(t => `
+    <button class="type-tab ${state.filter === t ? 'active' : ''}" onclick="setFilter('${t}')">
+      ${t === 'all' ? 'All' : t}
+      ${t !== 'all' ? `<span class="count">${summary.types[t] || 0}</span>` : `<span class="count">${Object.values(summary.types).reduce((a,b)=>a+b,0)}</span>`}
+    </button>
+  `).join('');
+}
+
+function setFilter(type) {
+  state.filter = type;
+  renderTypeTabs();
+  renderTree();
+}
+
+function renderTree() {
+  const { index, files } = state.data;
+  const tree = document.getElementById('tree');
+  let html = '';
+
+  if (index && index.sections) {
+    // Criterion 2: Render MEMORY.md topology as tree
+    for (const section of index.sections) {
+      html += renderSection(section, files);
+    }
+  } else {
+    // Fallback: flat list grouped by type
+    html += '<div class="tree-section"><div class="tree-header">All Files</div>';
+    for (const f of files) {
+      if (shouldShow(f)) html += renderTreeItem(f);
+    }
+    html += '</div>';
+  }
+
+  // Files NOT in the index (orphans)
+  const indexedFiles = new Set();
+  if (index) {
+    const walk = (nodes) => {
+      for (const n of nodes) {
+        if (n.file) indexedFiles.add(n.file);
+        if (n.children) walk(n.children);
+      }
+    };
+    walk(index.sections);
+  }
+  const orphans = files.filter(f => !indexedFiles.has(f.name) && f.name !== 'MEMORY.md');
+  if (orphans.length > 0) {
+    html += '<div class="tree-section"><div class="tree-header" onclick="toggleSection(this)"><span class="arrow">&#9660;</span> Orphaned Files (not in MEMORY.md)</div><div class="section-body">';
+    for (const f of orphans) {
+      if (shouldShow(f)) html += renderTreeItem(f);
+    }
+    html += '</div></div>';
+  }
+
+  tree.innerHTML = html;
+}
+
+function renderSection(section, files) {
+  let html = '';
+  if (section.children) {
+    for (const child of section.children) {
+      if (child.type === 'leaf') {
+        // Criterion 2: Link leaf → actual file
+        const file = files.find(f => f.name === child.file);
+        if (file && shouldShow(file)) {
+          html += renderTreeItem(file, child.description);
+        } else if (!file) {
+          // Referenced but missing
+          html += `<div class="tree-item" style="color:var(--red);opacity:0.6">
+            <span class="type-badge" style="background:#f8514922;color:var(--red)">missing</span>
+            ${child.label}
+            <span style="font-size:10px;margin-left:auto">→ ${child.file}</span>
+          </div>`;
+        }
+      } else if (child.title) {
+        // Subsection
+        html += `<div class="tree-section"><div class="tree-header" onclick="toggleSection(this)"><span class="arrow">&#9660;</span> ${child.title}</div><div class="section-body">`;
+        if (child.children) {
+          for (const leaf of child.children) {
+            if (leaf.type === 'leaf') {
+              const file = files.find(f => f.name === leaf.file);
+              if (file && shouldShow(file)) {
+                html += renderTreeItem(file, leaf.description);
+              }
+            }
+          }
+        }
+        if (child.table) {
+          for (const row of child.table) {
+            html += `<div class="tree-item" style="font-size:11px;color:var(--text-muted)">
+              <span style="font-family:var(--font-mono)">${row[0] || ''}</span>
+              <span style="margin-left:auto;font-size:10px">${row[1] || ''}</span>
+            </div>`;
+          }
+        }
+        html += '</div></div>';
+      }
+    }
+  }
+  if (section.title) {
+    return `<div class="tree-section"><div class="tree-header" onclick="toggleSection(this)"><span class="arrow">&#9660;</span> ${section.title}</div><div class="section-body">${html}</div></div>`;
+  }
+  return html;
+}
+
+function renderTreeItem(file, extraDesc) {
+  const isActive = state.activeFile === file.name;
+  const desc = extraDesc || file.description || '';
+  return `
+    <div class="tree-item ${isActive ? 'active' : ''}" onclick="selectFile('${file.name}')">
+      <span class="type-badge type-${file.type}">${file.type}</span>
+      <span>${file.name}</span>
+      ${desc ? `<span class="desc-hint" title="${desc}">${desc.substring(0, 30)}</span>` : ''}
+      <span class="token-count">${file.tokens > 1000 ? (file.tokens/1000).toFixed(1)+'k' : file.tokens}</span>
+    </div>`;
+}
+
+function shouldShow(file) {
+  if (state.filter !== 'all' && file.type !== state.filter) return false;
+  if (state.searchQuery) {
+    const q = state.searchQuery.toLowerCase();
+    return file.name.toLowerCase().includes(q) ||
+           file.description?.toLowerCase().includes(q) ||
+           file.memoryName?.toLowerCase().includes(q) ||
+           file.content?.toLowerCase().includes(q);
+  }
+  return true;
+}
+
+function toggleSection(el) {
+  el.classList.toggle('collapsed');
+  const body = el.nextElementSibling;
+  if (body) body.style.display = el.classList.contains('collapsed') ? 'none' : '';
+}
+
+async function selectFile(name) {
+  const res = await fetch(`/api/file/${encodeURIComponent(name)}`);
+  const file = await res.json();
+  state.activeFile = name;
+  state.editingFile = null; // reset editing state
+
+  const main = document.getElementById('main');
+  const modDate = new Date(file.raw ? state.data.files.find(f=>f.name===name)?.modified : Date.now()).toLocaleString('zh-CN');
+
+  main.innerHTML = `
+    <div class="editor-header">
+      <span class="file-name">${name}</span>
+      <span class="type-badge type-${state.data.files.find(f=>f.name===name)?.type || 'other'}">${state.data.files.find(f=>f.name===name)?.type || ''}</span>
+      <span class="file-meta">
+        <span>${formatBytes(file.raw?.length || 0)}</span>
+        <span>${file.tokens?.toLocaleString() || 0} tokens</span>
+        <span>${modDate}</span>
+      </span>
+      <button class="save-btn" id="saveBtn" onclick="saveFile('${name}')">Save</button>
+    </div>
+    <div class="editor-body">
+      <textarea id="editor" spellcheck="false">${escapeHtml(file.raw || '')}</textarea>
+    </div>
+  `;
+
+  // Update sidebar active state
+  renderTree();
+
+  // Track changes — set editingFile so auto-refresh won't overwrite
+  const textarea = document.getElementById('editor');
+  let original = textarea.value;
+  textarea.addEventListener('input', () => {
+    const btn = document.getElementById('saveBtn');
+    if (textarea.value !== original) {
+      state.editingFile = name; // mark as editing
+      btn.textContent = 'Save *';
+      btn.style.background = '#d29922';
+    } else {
+      state.editingFile = null;
+      btn.textContent = 'Save';
+      btn.style.background = '';
+    }
+  });
+
+  // Keyboard shortcut
+  textarea.addEventListener('keydown', (e) => {
+    if ((e.metaKey || e.ctrlKey) && e.key === 's') {
+      e.preventDefault();
+      saveFile(name);
+    }
+  });
+}
+
+async function saveFile(name) {
+  const textarea = document.getElementById('editor');
+  const btn = document.getElementById('saveBtn');
+  if (!textarea) return;
+
+  btn.textContent = 'Saving...';
+  btn.classList.add('saving');
+
+  const res = await fetch('/api/save', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ name, content: textarea.value }),
+  });
+
+  const result = await res.json();
+  btn.classList.remove('saving');
+
+  if (result.ok) {
+    state.editingFile = null; // allow auto-refresh again
+    btn.textContent = 'Saved';
+    btn.classList.add('saved');
+    showToast('Saved successfully', 'success');
+    setTimeout(() => { btn.classList.remove('saved'); btn.textContent = 'Save'; }, 2000);
+    // Reload data to update tokens etc
+    load();
+  } else {
+    btn.textContent = 'Error';
+    showToast('Save failed: ' + (result.error || ''), 'error');
+  }
+}
+
+function renderAnalysis() {
+  const { tokenBudget, duplicates, summary } = state.data;
+  const panel = document.getElementById('analysis');
+  const maxTokens = Math.max(...tokenBudget.byFile.map(f => f.tokens), 1);
+
+  // 200K context window reference
+  const pctOfWindow = ((tokenBudget.total / 200000) * 100).toFixed(1);
+  const nearLimit = tokenBudget.total > 160000;
+
+  let html = `
+    <div class="analysis-card">
+      <h3>Token Budget</h3>
+      <div class="token-total">
+        <div class="number">${tokenBudget.total.toLocaleString()}</div>
+        <div class="label">total tokens loaded per session</div>
+        ${nearLimit ? `<div class="warning">&#9888; ${pctOfWindow}% of 200K window — consider trimming</div>` : `<div class="label" style="margin-top:2px">${pctOfWindow}% of 200K window</div>`}
+      </div>
+  `;
+
+  // Bar chart by type
+  const typeColors = {
+    user: 'var(--accent)', feedback: 'var(--green)', project: 'var(--orange)',
+    reference: 'var(--purple)', global: 'var(--pink)', index: 'var(--accent)',
+    other: 'var(--text-muted)'
+  };
+  for (const [type, tokens] of Object.entries(tokenBudget.byType).sort((a,b) => b[1]-a[1])) {
+    const pct = (tokens / tokenBudget.total * 100).toFixed(1);
+    html += `
+      <div class="token-bar-row">
+        <span class="token-bar-label">${type}</span>
+        <div class="token-bar-track"><div class="token-bar-fill" style="width:${pct}%;background:${typeColors[type]||'var(--text-muted)'}"></div></div>
+        <span class="token-bar-value">${tokens.toLocaleString()}</span>
+      </div>`;
+  }
+  html += '</div>';
+
+  // Top files by tokens
+  html += '<div class="analysis-card"><h3>Heaviest Files</h3>';
+  const sortedFiles = [...tokenBudget.byFile].sort((a,b) => b.tokens - a.tokens).slice(0, 8);
+  for (const f of sortedFiles) {
+    const pct = (f.tokens / maxTokens * 100);
+    const barColor = typeColors[f.type] || 'var(--text-muted)';
+    html += `
+      <div class="token-bar-row">
+        <span class="token-bar-label" style="width:100px;cursor:pointer" onclick="selectFile('${f.name}')">${f.name.replace('.md','').substring(0,14)}</span>
+        <div class="token-bar-track"><div class="token-bar-fill" style="width:${pct}%;background:${barColor}"></div></div>
+        <span class="token-bar-value">${f.tokens.toLocaleString()}</span>
+      </div>`;
+  }
+  html += '</div>';
+
+  // Duplicates
+  html += '<div class="analysis-card"><h3>Duplicate Detection</h3>';
+  if (duplicates.length === 0) {
+    html += '<div style="font-size:12px;color:var(--text-muted);text-align:center;padding:8px">No duplicates found</div>';
+  } else {
+    for (const d of duplicates) {
+      const typeLabel = d.type === 'multi-ref' ? 'Multi-Reference' :
+                       d.type === 'title-similar' ? 'Title Similar' : 'Description Similar';
+      const typeClass = d.type === 'multi-ref' ? 'warning' : 'info';
+      html += `
+        <div class="dupe-item">
+          <div class="dupe-type ${typeClass}">${typeLabel}</div>
+          <div class="dupe-files">${d.files.join(' &harr; ')}</div>
+          <div class="dupe-sim">Similarity: ${(d.similarity * 100).toFixed(0)}%</div>
+        </div>`;
+    }
+  }
+  html += '</div>';
+
+  // File health
+  const orphanCount = countOrphans();
+  if (orphanCount > 0) {
+    html += `<div class="analysis-card"><h3>Health</h3>
+      <div class="dupe-item">
+        <div class="dupe-type warning">Orphaned Files</div>
+        <div class="dupe-files">${orphanCount} file(s) not referenced in MEMORY.md</div>
+      </div>
+    </div>`;
+  }
+
+  // Missing references
+  const missingRefs = findMissingRefs();
+  if (missingRefs.length > 0) {
+    html += `<div class="analysis-card"><h3>Broken References</h3>`;
+    for (const ref of missingRefs) {
+      html += `<div class="dupe-item">
+        <div class="dupe-type" style="color:var(--red)">Missing File</div>
+        <div class="dupe-files">${ref}</div>
+      </div>`;
+    }
+    html += '</div>';
+  }
+
+  panel.innerHTML = html;
+}
+
+function countOrphans() {
+  const { index, files } = state.data;
+  if (!index) return 0;
+  const indexed = new Set();
+  const walk = (nodes) => {
+    for (const n of nodes) {
+      if (n.file) indexed.add(n.file);
+      if (n.children) walk(n.children);
+    }
+  };
+  walk(index.sections);
+  return files.filter(f => !indexed.has(f.name) && f.name !== 'MEMORY.md').length;
+}
+
+function findMissingRefs() {
+  const { index, files } = state.data;
+  if (!index) return [];
+  const existing = new Set(files.map(f => f.name));
+  const missing = [];
+  const walk = (nodes) => {
+    for (const n of nodes) {
+      if (n.file && !existing.has(n.file)) missing.push(n.file);
+      if (n.children) walk(n.children);
+    }
+  };
+  walk(index.sections);
+  return missing;
+}
+
+function formatBytes(bytes) {
+  if (bytes < 1024) return bytes + ' B';
+  if (bytes < 1048576) return (bytes / 1024).toFixed(1) + ' KB';
+  return (bytes / 1048576).toFixed(1) + ' MB';
+}
+
+function escapeHtml(text) {
+  const div = document.createElement('div');
+  div.textContent = text;
+  return div.innerHTML;
+}
+
+function showToast(msg, type) {
+  const toast = document.getElementById('toast');
+  toast.textContent = msg;
+  toast.className = `status-toast ${type} show`;
+  setTimeout(() => toast.classList.remove('show'), 2500);
+}
+
+// Search
+document.getElementById('searchInput').addEventListener('input', (e) => {
+  state.searchQuery = e.target.value;
+  renderTree();
+});
+
+// Boot
+load().then(() => {
+  startAutoRefresh();
+  // Show project path
+  if (state.data?.meta?.projectPath) {
+    document.getElementById('projectPath').textContent = state.data.meta.projectPath;
+  }
+});
+</script>
+</body>
+</html>
